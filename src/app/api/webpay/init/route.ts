@@ -9,8 +9,10 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Faltan parámetros" }, { status: 400 })
     }
 
-    const baseUrl = process.env.NEXT_PUBLIC_BASE_URL
+    const baseUrl = process.env.NEXT_PUBLIC_BASE_URL ?? `https://${req.headers.get("host")}`
     const returnUrl = `${baseUrl}/api/webpay/confirm`
+
+    console.log("Return URL:", returnUrl)
 
     const tx = new WebpayPlus.Transaction(
       new Options(
