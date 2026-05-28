@@ -25,18 +25,24 @@ export async function GET(req: NextRequest) {
     const response = await tx.commit(token)
 
     if (response.response_code === 0) {
-      // ─── Recuperar datos de la sesión temporal ───────────────
       const sessionData = await prisma.order.findFirst({
         where: { buyOrder: response.buy_order },
       })
 
-      // Solo crear si no existe (evitar duplicados)
       if (!sessionData) {
-        // Obtener datos del checkout desde cookie temporal
         const checkoutCookie = req.cookies.get("checkout_data")?.value
         const checkoutData = checkoutCookie ? JSON.parse(checkoutCookie) : {}
 
-        await prisma.order.create({
+        // Verificar si el userId existe en la BD
+        let validUserId = null
+        if (checkoutData.userId) {
+          const userExists = await prisma.user.findUnique({
+            where: { id: checkoutData.userId },
+          })
+          validUserId = userExists ? checkoutData.userId : null
+        }
+
+        const order = await prisma.order.create({
           data: {
             buyOrder:  response.buy_order,
             status:    "PAGADO",
@@ -49,7 +55,7 @@ export async function GET(req: NextRequest) {
             direccion: checkoutData.direccion ?? "",
             ciudad:    checkoutData.ciudad    ?? "",
             region:    checkoutData.region    ?? "",
-            userId:    checkoutData.userId    ?? null,
+            userId:    validUserId,
             items: {
               create: (checkoutData.items ?? []).map((item: {
                 productId: string
@@ -62,7 +68,22 @@ export async function GET(req: NextRequest) {
               })),
             },
           },
+          include: { items: { include: { product: true } } },
         })
+
+        if (order.email) {
+          await sendOrderConfirmation({
+            to:      order.email,
+            nombre:  order.nombre,
+            orderId: order.buyOrder,
+            total:   order.total,
+            items:   order.items.map((i) => ({
+              name:      i.product.name,
+              quantity:  i.quantity,
+              unitPrice: i.unitPrice,
+            })),
+          })
+        }
       }
 
       const params = new URLSearchParams({
@@ -77,7 +98,6 @@ export async function GET(req: NextRequest) {
         `${process.env.NEXT_PUBLIC_BASE_URL}/orden/exito?${params}`
       )
 
-      // Limpiar cookie de checkout
       res.cookies.delete("checkout_data")
       return res
     }
